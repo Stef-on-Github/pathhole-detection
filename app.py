@@ -1,43 +1,85 @@
+import os
 import streamlit as st
+import cv2
+import numpy as np
 import torch
 from PIL import Image
-import requests
-from io import BytesIO
+import tempfile
 
-# Load models
-@st.cache_resource
-def load_model(model_path):
-    model = torch.load(model_path, map_location=torch.device('cpu'))
-    model.eval()
-    return model
+# Load models from local files
+last_model_path = "models/last.pt"  # Replace with your local path
+best_model_path = "models/best.pt"  # Replace with your local path
 
-# Pothole detection function
-def detect_potholes(model, image):
-    with torch.no_grad():
-        result = model(image)
-    return result
+last_model = torch.load(last_model_path, map_location=torch.device('cpu'))
+best_model = torch.load(best_model_path, map_location=torch.device('cpu'))
 
-# Streamlit UI
-st.title("Pothole Detection App")
-st.sidebar.title("Select Model")
-model_choice = st.sidebar.selectbox("Choose a model", ("last.pt", "best.pt"))
+# Function to select model
+def load_model(model_choice):
+    if model_choice == "last.pt":
+        return last_model
+    elif model_choice == "best.pt":
+        return best_model
 
-# Load selected model
-model_path = f"models/{model_choice}"  # Assuming models are stored in ./models/
-model = load_model(model_path)
+# Streamlit app
+st.title("Real-Time Pothole Detection")
+st.write("Upload an image or video to detect potholes.")
 
-# File upload
-uploaded_file = st.file_uploader("Upload an image", type=["jpg", "png", "jpeg"])
+# Model selection
+model_choice = st.radio("Select Model", ("last.pt", "best.pt"))
+model = load_model(model_choice)
+
+# File uploader
+uploaded_file = st.file_uploader("Upload Image or Video", type=["jpg", "png", "mp4"])
+
+def detect_and_display(image, model):
+    # Ensure image is in the correct format for model input
+    results = model(image)
+    st.image(np.squeeze(results.render()), caption="Detection Result", use_column_width=True)
+    pothole_detected = any(
+        'pothole' in result['name'].lower() for result in results.pandas().xyxy[0].to_dict(orient="records")
+    )
+    return pothole_detected
 
 if uploaded_file:
-    image = Image.open(uploaded_file)
-    st.image(image, caption="Uploaded Image", use_column_width=True)
+    # Process uploaded image
+    if uploaded_file.type.startswith("image"):
+        file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
+        img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
-    st.write("Detecting potholes...")
-    # Assuming model expects a tensor input
-    input_image = torch.tensor(image).unsqueeze(0)  # Modify based on model requirement
-    result = detect_potholes(model, input_image)
+        # Detect and display results
+        pothole_detected = detect_and_display(img_rgb, model)
 
-    # Display result
-    st.write("Detection Result:")
-    st.image(result, caption="Detection Output", use_column_width=True)  # Adjust as needed
+        if pothole_detected:
+            st.warning("⚠️ Pothole Detected! Alerting...")
+
+    # Process uploaded video
+    elif uploaded_file.type.startswith("video"):
+        tfile = tempfile.NamedTemporaryFile(delete=False)
+        tfile.write(uploaded_file.read())
+        cap = cv2.VideoCapture(tfile.name)
+        stframe = st.empty()
+        pothole_detected = False
+
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = model(frame_rgb)
+            stframe.image(np.squeeze(results.render()), channels="RGB")
+
+            pothole_detected = pothole_detected or any(
+                'pothole' in result['name'].lower() for result in results.pandas().xyxy[0].to_dict(orient="records")
+            )
+
+        cap.release()
+        tfile.close()
+        os.unlink(tfile.name)
+
+        if pothole_detected:
+            st.warning("⚠️ Pothole(s) Detected in the Video! Alerting...")
+
+# Footer
+st.write("Developed by Team Pothole")
