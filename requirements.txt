@@ -3,3 +3,4 @@ torchvision
 pillow
 requests
 yolov5
+ultralytics
