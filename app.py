@@ -23,7 +23,7 @@ st.sidebar.title("Select Model")
 model_choice = st.sidebar.selectbox("Choose a model", ("last.pt", "best.pt"))
 
 # Load selected model
-model_path = f"D:/chages in pathhole/Pothole_Detection_Final/app/models/{model_choice}"  # Assuming models are stored in ./models/
+model_path = f"models/{model_choice}"  # Assuming models are stored in ./models/
 model = load_model(model_path)
 
 # File upload
